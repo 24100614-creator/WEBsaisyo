@@ -1,119 +1,119 @@
 import pandas as pd
 import glob
 import random
-import json
-from dash import Dash, dcc, html, Input, Output, State, no_update, callback_context
+import os
+from dash import Dash, dcc, html, Input, Output, State, no_update
 
-#--- データの読み込み ---
+#--- データの読み込み (エラーに強い設計) ---
 def load_data():
     all_files = glob.glob("*.csv")
     category_map = {}
+    
+    if not all_files:
+        print("CSVファイルが見つかりません。")
+        return category_map
+
     for filename in all_files:
         try:
-            # 最新のCSV構造(A列:カテゴリー, B列:数字)を想定
-            df = pd.read_csv(filename, header=None)
+            # Shift-JISやUTF-8など、エンコーディングエラーを回避
+            try:
+                df = pd.read_csv(filename, header=None, encoding='utf-8')
+            except:
+                df = pd.read_csv(filename, header=None, encoding='shift-jis')
+            
             current_cat = None
             for _, row in df.iterrows():
-                cat_val = row.iloc[0]
-                num_val = row.iloc[1]
+                # A列(0):カテゴリー, B列(1):数字
+                cat_val = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
+                num_val = str(row.iloc[1]).strip() if len(row) > 1 and pd.notna(row.iloc[1]) else ""
                 
-                # A列に値があればカテゴリーを更新
-                if pd.notna(cat_val) and str(cat_val).strip() != "":
-                    current_cat = str(cat_val).strip()
+                # A列に文字があれば新しいカテゴリー
+                if cat_val != "" and cat_val != "nan":
+                    current_cat = cat_val
                     if current_cat not in category_map:
                         category_map[current_cat] = []
                 
-                # 数字をリストに追加（カンマなどを除去）
-                if current_cat and pd.notna(num_val):
-                    clean_num = str(num_val).replace(',', '').strip()
+                # 数字の掃除（末尾のカンマなどを除去）
+                if current_cat and num_val != "" and num_val != "nan":
+                    clean_num = num_val.rstrip(',')
                     if clean_num:
                         category_map[current_cat].append(clean_num)
         except Exception as e:
             print(f"Error loading {filename}: {e}")
             continue
-    return category_map
+            
+    # 空のカテゴリーを削除
+    return {k: v for k, v in category_map.items() if v}
 
-# データ準備
+# データ初期化
 data_dict = load_data()
 categories = sorted(list(data_dict.keys()))
 
-#--- アプリの作成 ---
+#--- アプリ作成 ---
 app = Dash(__name__)
 server = app.server
 
-# カスタムCSS/フォントの適用
+# デザインのカスタマイズ
 app.index_string = '''
 <!DOCTYPE html>
 <html>
     <head>
         {%metas%}
-        <title>Premium Roulette</title>
+        <title>Magic Roulette</title>
         {%favicon%}
         {%css%}
-        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Montserrat:wght@800&display=swap" rel="stylesheet">
         <style>
+            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@900&family=Noto+Sans+JP:wght@500;900&display=swap');
             body {
-                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                background: #f0f2f5;
                 font-family: 'Noto Sans JP', sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
                 margin: 0;
             }
-            .main-container {
-                max-width: 600px;
-                margin: 50px auto;
+            .card {
                 background: white;
                 padding: 40px;
-                border-radius: 24px;
-                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                border-radius: 30px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.1);
                 text-align: center;
+                width: 90%;
+                max-width: 450px;
             }
-            .roulette-display {
-                height: 180px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                margin: 30px 0;
-                background: #f8f9fa;
-                border-radius: 16px;
-                border: 2px dashed #dee2e6;
-                position: relative;
-                overflow: hidden;
-            }
-            .result-number {
+            .display-box {
+                background: #1a1a1a;
+                color: #00ffcc;
                 font-family: 'Montserrat', sans-serif;
                 font-size: 80px;
-                color: #2c3e50;
-                font-weight: 800;
-                transition: all 0.3s ease;
+                height: 160px;
+                line-height: 160px;
+                border-radius: 20px;
+                margin: 30px 0;
+                box-shadow: inset 0 0 20px rgba(0,255,204,0.2);
+                text-shadow: 0 0 15px rgba(0,255,204,0.5);
+                overflow: hidden;
             }
             .spin-button {
-                background: linear-gradient(to right, #6a11cb 0%, #2575fc 100%);
+                background: linear-gradient(135deg, #00dbde 0%, #fc00ff 100%);
                 color: white;
                 border: none;
-                padding: 18px 60px;
-                font-size: 24px;
-                font-weight: bold;
-                border-radius: 50px;
-                cursor: pointer;
-                transition: transform 0.2s, box-shadow 0.2s;
+                padding: 18px;
                 width: 100%;
-                margin-top: 20px;
+                font-size: 22px;
+                font-weight: 900;
+                border-radius: 15px;
+                cursor: pointer;
+                transition: 0.3s;
             }
             .spin-button:hover {
-                transform: scale(1.02);
-                box-shadow: 0 10px 20px rgba(37, 117, 252, 0.3);
+                transform: scale(1.03);
+                filter: brightness(1.1);
             }
-            .spin-button:active {
-                transform: scale(0.98);
-            }
-            .dropdown-container {
-                text-align: left;
-                margin-bottom: 20px;
-            }
-            .label {
-                font-weight: bold;
-                color: #495057;
-                margin-bottom: 8px;
-                display: block;
+            .spin-button:disabled {
+                background: #ccc;
+                cursor: not-allowed;
             }
         </style>
     </head>
@@ -130,75 +130,68 @@ app.index_string = '''
 
 app.layout = html.Div([
     html.Div([
-        html.H1("PREMIUM ROULETTE", style={'letterSpacing': '3px', 'color': '#1a1a1a'}),
-        html.P("カテゴリーを選んでルーレットをスタート", style={'color': '#6c757d'}),
+        html.H1("ROULETTE", style={'margin': '0', 'fontWeight': '900', 'letterSpacing': '5px'}),
+        html.P("カテゴリーを選んでスタート！", style={'color': '#666'}),
         
         html.Div([
-            html.Span("1. CATEGORY", className="label"),
             dcc.Dropdown(
-                id='category-dropdown',
-                options=[{'label': k, 'value': k} for k in categories],
-                placeholder="リストから選択...",
+                id='cat-drop',
+                options=[{'label': c, 'value': c} for c in categories],
+                placeholder="--- カテゴリー選択 ---",
+                style={'textAlign': 'left'}
             ),
-        ], className="dropdown-container"),
+        ], style={'marginTop': '20px'}),
 
-        # ルーレット表示部
-        html.Div([
-            html.Div(id='result-display', className="result-number", children="---")
-        ], className="roulette-display"),
+        html.Div("---", id='display-text', className="display-box"),
 
-        html.Button('START SPIN', id='spin-button', n_clicks=0, className="spin-button"),
-        
-        # インターバルコンポーネント（アニメーション用）
-        dcc.Interval(id='anim-interval', interval=80, n_intervals=0, disabled=True),
-        dcc.Store(id='anim-counter', data=0),
-        dcc.Store(id='final-choice', data="")
+        html.Button("SPIN START!", id='spin-btn', className="spin-button"),
 
-    ], className="main-container")
+        # アニメーション用
+        dcc.Interval(id='timer', interval=60, n_intervals=0, disabled=True),
+        dcc.Store(id='store-final-val'),
+        dcc.Store(id='store-counter', data=0)
+    ], className="card")
 ])
 
 #--- コールバック ---
 
-# ボタンクリックでアニメーション開始
+# 1. ボタンが押されたらアニメーション開始＆最終結果を決定
 @app.callback(
-    Output('anim-interval', 'disabled'),
-    Output('anim-counter', 'data'),
-    Output('final-choice', 'data'),
-    Input('spin-button', 'n_clicks'),
-    State('category-dropdown', 'value'),
+    Output('timer', 'disabled'),
+    Output('timer', 'n_intervals'),
+    Output('store-final-val', 'data'),
+    Output('store-counter', 'data'),
+    Input('spin-btn', 'n_clicks'),
+    State('cat-drop', 'value'),
     prevent_initial_call=True
 )
-def start_animation(n_clicks, selected_cat):
-    if not selected_cat:
-        return no_update, no_update, no_update
+def start_spin(n, cat):
+    if not cat: return no_update, no_update, no_update, no_update
     
-    choices = data_dict.get(selected_cat, [])
-    if not choices:
-        return no_update, no_update, no_update
+    choices = data_dict.get(cat, [])
+    if not choices: return no_update, no_update, no_update, no_update
     
     final = random.choice(choices)
-    return False, 0, final
+    return False, 0, final, 0
 
-# アニメーション中の数字切り替えと終了判定
+# 2. アニメーション処理（数字をパタパタ変える）
 @app.callback(
-    Output('result-display', 'children'),
-    Output('anim-interval', 'disabled', allow_duplicate=True),
-    Output('anim-counter', 'data', allow_duplicate=True),
-    Input('anim-interval', 'n_intervals'),
-    State('anim-counter', 'data'),
-    State('final-choice', 'data'),
-    State('category-dropdown', 'value'),
+    Output('display-text', 'children'),
+    Output('timer', 'disabled', allow_duplicate=True),
+    Input('timer', 'n_intervals'),
+    State('store-final-val', 'data'),
+    State('cat-drop', 'value'),
+    State('store-counter', 'data'),
     prevent_initial_call=True
 )
-def update_animation(n_intervals, counter, final, selected_cat):
-    choices = data_dict.get(selected_cat, [])
+def update_animation(n, final, cat, counter):
+    choices = data_dict.get(cat, [])
     
-    # 20回（約1.6秒）シャッフルして最後に本物を出す
-    if counter < 20:
-        return random.choice(choices), False, counter + 1
+    # 25回シャッフルしたら終了
+    if n < 25:
+        return random.choice(choices), False
     else:
-        return final, True, 0
+        return final, True
 
 if __name__ == '__main__':
-    # サーバーデプロイ時は app.run() は不要だが、Colabテスト用に残す場合は以下
     app.run(jupyter_mode='inline')
